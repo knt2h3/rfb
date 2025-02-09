@@ -17,6 +17,11 @@ path = "src/lib.rs"
 [[example]]
 name = "example-server"
 path = "examples/server.rs"
+required-features = ["server"]
+
+[features]
+default = []
+server = []
 
 [dependencies]
 ascii = { version = "1.1", default-features = false }

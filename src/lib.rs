@@ -8,4 +8,5 @@ pub mod encodings;
 pub mod keysym;
 pub mod pixel_formats;
 pub mod rfb;
+#[cfg(feature = "server")]
 pub mod server;
