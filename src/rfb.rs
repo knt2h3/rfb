@@ -164,8 +164,8 @@ impl WriteMessage for SecurityType {
     {
         async move {
             let val = match self {
-                SecurityType::None => 0,
-                SecurityType::VncAuthentication => 1,
+                SecurityType::None => 1,
+                SecurityType::VncAuthentication => 2,
             };
             stream.write_u8(val).await?;
 
@@ -176,6 +176,7 @@ impl WriteMessage for SecurityType {
 }
 
 // Section 7.1.3
+#[derive(Debug)]
 pub enum SecurityResult {
     Success,
     Failure(String),
