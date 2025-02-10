@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use log::{error, info};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
-use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, Resolution, SecurityResult, SecurityType, SecurityTypes, WriteMessage}};
+use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, Resolution, SecurityResult, SecurityType, SecurityTypes, WriteMessage}};
 
 /// Immutable state
 pub struct VncClientConfig {
@@ -42,9 +42,12 @@ where
         msg.write_to(&mut self.conn).await
     }
 
-    pub async fn framebuffer_update_request(&mut self, incremental: bool, position: Position, resolution: Resolution) -> Result<(), ProtocolError> {
+    pub async fn framebuffer_update_request(&mut self, incremental: bool, position: Position, resolution: Resolution) -> Result<FramebufferUpdateEncoded, ProtocolError> {
         let msg = ClientMessage::FramebufferUpdateRequest(FramebufferUpdateRequest { incremental, position, resolution });
-        msg.write_to(&mut self.conn).await
+        msg.write_to(&mut self.conn).await?;
+
+        let encoded = FramebufferUpdateEncoded::read_from(&mut self.conn).await?;
+        Ok(encoded)
     }
 
     pub async fn key_event(&mut self, is_pressed: bool, keysym: KeySym, keysym_raw: u32) -> Result<(), ProtocolError> {

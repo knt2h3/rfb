@@ -309,6 +309,10 @@ pub struct FramebufferUpdate {
     rectangles: Vec<Rectangle>,
 }
 
+pub struct FramebufferUpdateEncoded {
+    pub rectangles: Vec<RectangleEncoded>,
+}
+
 impl FramebufferUpdate {
     pub fn new(rectangles: Vec<Rectangle>) -> Self {
         FramebufferUpdate { rectangles }
@@ -401,6 +405,14 @@ pub struct Rectangle {
     data: Box<dyn Encoding>,
 }
 
+/// A rectangle that has been encoded into a byte vector. Used on the client side.
+pub struct RectangleEncoded {
+    pub position: Position,
+    pub dimensions: Resolution,
+    pub encoding_type: EncodingType,
+    pub data: Vec<u8>,
+}
+
 impl Rectangle {
     pub fn new(x: u16, y: u16, width: u16, height: u16, data: Box<dyn Encoding>) -> Self {
         Rectangle {
@@ -442,6 +454,44 @@ impl WriteMessage for Rectangle {
     }
 }
 
+impl ReadMessage for RectangleEncoded {
+    fn read_from<'a, R>(stream: &'a mut R) -> BoxFuture<'a, Result<Self, ProtocolError>>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        async move {
+            let x = stream.read_u16().await?;
+            let y = stream.read_u16().await?;
+            let width = stream.read_u16().await?;
+            let height = stream.read_u16().await?;
+
+            let encoding_type = EncodingType::from(stream.read_i32().await?);
+
+            let position = Position { x, y };
+            let dimensions = Resolution { width, height };
+
+            let data = match encoding_type {
+                EncodingType::Raw => {
+                    let mut data = vec![0u8; width as usize * height as usize * 4];
+                    stream.read_exact(&mut data).await?;
+                    data
+                }
+                _ => {
+                    unimplemented!()
+                }
+            };
+
+            Ok(RectangleEncoded {
+                position,
+                dimensions,
+                encoding_type,
+                data,
+            })
+        }
+        .boxed()
+    }
+}
+
 impl WriteMessage for FramebufferUpdate {
     fn write_to<'a, W>(self, stream: &'a mut W) -> BoxFuture<'a, Result<(), ProtocolError>>
     where
@@ -462,6 +512,30 @@ impl WriteMessage for FramebufferUpdate {
             }
 
             Ok(())
+        }
+        .boxed()
+    }
+}
+
+impl ReadMessage for FramebufferUpdateEncoded {
+    fn read_from<'a, R>(stream: &'a mut R) -> BoxFuture<'a, Result<Self, ProtocolError>>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        async move {
+            // Read message type (0) and padding byte
+            stream.read_u8().await?;  // message type
+            stream.read_u8().await?;  // padding
+
+            let n_rect = stream.read_u16().await?;
+            let mut rectangles = Vec::with_capacity(n_rect as usize);
+
+            for _ in 0..n_rect {
+                let rect = RectangleEncoded::read_from(stream).await?;
+                rectangles.push(rect);
+            }
+
+            Ok(FramebufferUpdateEncoded { rectangles })
         }
         .boxed()
     }
