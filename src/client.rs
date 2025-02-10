@@ -2,11 +2,13 @@ use std::net::SocketAddr;
 use log::{error, info, debug};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
-use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, Resolution, SecurityResult, SecurityType, SecurityTypes, WriteMessage}};
+use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, Resolution, SecurityResult, SecurityType, SecurityTypes, ServerInit, WriteMessage}};
 
 /// Immutable state
 pub struct VncClientConfig {
     pub version: ProtoVersion,
+    /// Whether we're willing to share the screen with other clients
+    pub shared: bool,
     // pub sec_types: SecurityTypes,
     // pub name: String,
 }
@@ -138,15 +140,17 @@ where
     async fn rfb_init(
         &mut self,
         // s: &mut (impl AsyncRead + AsyncWrite + Unpin + Send),
-    ) {
+    ) -> Result<(), ProtocolError> {
         let init = ClientInit {
-            // we're not willing to share the screen with other clients
-            shared: false
+            shared: self.config.shared,
         };
 
-        // init.write_to(&mut stream).await?;
+        init.write_to(&mut self.conn).await?;
 
-        todo!()
+        let server_init = ServerInit::read_from(&mut self.conn).await?;
+        info!("Rx: ServerInit={:?}", server_init);
+
+        Ok(())
     }
 
 }
