@@ -346,6 +346,20 @@ impl ReadMessage for Position {
     }
 }
 
+impl WriteMessage for Position {
+    fn write_to<'a, W>(self, stream: &'a mut W) -> BoxFuture<'a, Result<(), ProtocolError>>
+    where
+        W: AsyncWrite + Unpin + Send,
+    {
+        async move {
+            stream.write_u16(self.x).await?;
+            stream.write_u16(self.y).await?;
+            Ok(())
+        }
+        .boxed()
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct Resolution {
     width: u16,
@@ -773,6 +787,62 @@ impl ReadMessage for ClientMessage {
             };
 
             res
+        }
+        .boxed()
+    }
+}
+
+impl WriteMessage for ClientMessage {
+    fn write_to<'a, W>(self, stream: &'a mut W) -> BoxFuture<'a, Result<(), ProtocolError>>
+    where
+        W: AsyncWrite + Unpin + Send,
+    {
+        async move {
+            match self {
+                ClientMessage::SetPixelFormat(pixel_format) => {
+                    stream.write_u8(0).await?; // message type
+                    stream.write_all(&[0u8; 3]).await?; // 3 bytes padding
+                    pixel_format.write_to(stream).await?;
+                }
+
+                ClientMessage::SetEncodings(encodings) => {
+                    stream.write_u8(2).await?; // message type
+                    stream.write_u8(0).await?; // 1 byte padding
+                    stream.write_u16(encodings.len() as u16).await?;
+                    for encoding in encodings {
+                        stream.write_i32(encoding.into()).await?;
+                    }
+                }
+
+                ClientMessage::FramebufferUpdateRequest(req) => {
+                    stream.write_u8(3).await?; // message type
+                    stream.write_u8(req.incremental as u8).await?;
+                    req.position.write_to(stream).await?;
+                    req.resolution.write_to(stream).await?;
+                }
+
+                ClientMessage::KeyEvent(key_event) => {
+                    stream.write_u8(4).await?; // message type
+                    stream.write_u8(key_event.is_pressed as u8).await?;
+                    stream.write_u16(0).await?; // 2 bytes padding
+                    stream.write_u32(key_event.keysym_raw).await?;
+                }
+
+                ClientMessage::PointerEvent(pointer_event) => {
+                    stream.write_u8(5).await?; // message type
+                    stream.write_u8(pointer_event.pressed.bits()).await?;
+                    pointer_event.position.write_to(stream).await?;
+                }
+
+                ClientMessage::ClientCutText(text) => {
+                    stream.write_u8(6).await?; // message type
+                    stream.write_all(&[0u8; 3]).await?; // 3 bytes padding
+                    stream.write_u32(text.len() as u32).await?;
+                    stream.write_all(text.as_bytes()).await?;
+                }
+            }
+
+            Ok(())
         }
         .boxed()
     }
