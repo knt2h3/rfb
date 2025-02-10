@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use log::{error, info};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
-use crate::rfb::{ClientInit, ClientMessage, PixelFormat, ProtoVersion, ProtocolError, ReadMessage, SecurityResult, SecurityType, SecurityTypes, WriteMessage};
+use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, Resolution, SecurityResult, SecurityType, SecurityTypes, WriteMessage}};
 
 /// Immutable state
 pub struct VncClientConfig {
@@ -20,10 +20,6 @@ impl<C> Client<C>
 where
     C: AsyncRead + AsyncWrite + Unpin + Send,
 {
-    // pub fn new(config: VncClientConfig) -> Self {
-    //     Self { config }
-    // }
-
     pub async fn init_conn(config: VncClientConfig, conn: C) -> Result<Self, HandshakeError> {
         let mut client = Client {
             config,
@@ -36,19 +32,34 @@ where
         Ok(client)
     }
 
-    // SetPixelFormat(PixelFormat),
-    // SetEncodings(Vec<EncodingType>),
-    // FramebufferUpdateRequest(FramebufferUpdateRequest),
-    // KeyEvent(KeyEvent),
-    // PointerEvent(PointerEvent),
-    // ClientCutText(String),
-
     pub async fn set_pixel_format(&mut self, pixel_format: PixelFormat) -> Result<(), ProtocolError> {
         let msg = ClientMessage::SetPixelFormat(pixel_format);
+        msg.write_to(&mut self.conn).await
+    }
 
-        ClientMessage::read_from(&mut self.conn).await?;
+    pub async fn set_encodings(&mut self, encodings: Vec<EncodingType>) -> Result<(), ProtocolError> {
+        let msg = ClientMessage::SetEncodings(encodings);
+        msg.write_to(&mut self.conn).await
+    }
 
-        todo!()
+    pub async fn framebuffer_update_request(&mut self, incremental: bool, position: Position, resolution: Resolution) -> Result<(), ProtocolError> {
+        let msg = ClientMessage::FramebufferUpdateRequest(FramebufferUpdateRequest { incremental, position, resolution });
+        msg.write_to(&mut self.conn).await
+    }
+
+    pub async fn key_event(&mut self, is_pressed: bool, keysym: KeySym, keysym_raw: u32) -> Result<(), ProtocolError> {
+        let msg = ClientMessage::KeyEvent(KeyEvent { is_pressed, keysym, keysym_raw });
+        msg.write_to(&mut self.conn).await
+    }
+
+    pub async fn pointer_event(&mut self, position: Position, pressed: MouseButtons) -> Result<(), ProtocolError> {
+        let msg = ClientMessage::PointerEvent(PointerEvent { position, pressed });
+        msg.write_to(&mut self.conn).await
+    }
+
+    pub async fn client_cut_text(&mut self, text: String) -> Result<(), ProtocolError> {
+        let msg = ClientMessage::ClientCutText(text);
+        msg.write_to(&mut self.conn).await
     }
 
     async fn rfb_handshake(
@@ -78,7 +89,7 @@ where
         // Security Handshake
         // let supported_types = self.config.sec_types.clone();
         let supported_types = SecurityTypes::read_from(&mut self.conn).await?;
-        // info!("Rx [{:?}]: Server SupportedSecurityTypes={:?}", addr, supported_types);
+        info!("Rx: Server SupportedSecurityTypes={:?}", supported_types);
 
         // info!("Tx [{:?}]: SecurityTypes={:?}", addr, supported_types);
         // supported_types.write_to(s).await?;
