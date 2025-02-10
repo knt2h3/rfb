@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use log::{error, info};
+use log::{error, info, debug};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, Resolution, SecurityResult, SecurityType, SecurityTypes, WriteMessage}};
@@ -65,12 +65,18 @@ where
         msg.write_to(&mut self.conn).await
     }
 
+    pub fn split(self) {
+        let (rh, wh) = tokio::io::split(self.conn);
+        // (Client { config: self.config, conn: rh }, Client { config: self.config, conn: wh })
+    }
+
     async fn rfb_handshake(
         &mut self,
         // s: &mut (impl AsyncRead + AsyncWrite + Unpin + Send),
     ) -> Result<(), HandshakeError> {
         // ProtocolVersion handshake
         let server_version = ProtoVersion::read_from(&mut self.conn).await?;
+        debug!("Rx: ServerVersion={:?}", server_version);
         // info!("Rx [{:?}]: ServerVersion={:?}", addr, server_version);
         // info!("Tx [{:?}]: ProtoVersion={:?}", addr, self.config.version);
         self.config.version.write_to(&mut self.conn).await?;
@@ -123,6 +129,7 @@ where
         // info!("Tx: SecurityResult=Success");
         // res.write_to(s).await?;
 
+        info!("Rx: SecurityResult={:?}", res);
         assert!(matches!(res, SecurityResult::Success));
 
         Ok(())
