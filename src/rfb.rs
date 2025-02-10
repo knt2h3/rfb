@@ -280,6 +280,32 @@ impl ServerInit {
     }
 }
 
+impl ReadMessage for ServerInit {
+    fn read_from<'a, R>(stream: &'a mut R) -> BoxFuture<'a, Result<Self, ProtocolError>>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        async move {
+            let initial_res = Resolution::read_from(stream).await?;
+            let pixel_format = PixelFormat::read_from(stream).await?;
+            
+            let name_len = stream.read_u32().await?;
+            let mut name_bytes = vec![0u8; name_len as usize];
+            stream.read_exact(&mut name_bytes).await?;
+            
+            let name = String::from_utf8(name_bytes)
+                .map_err(|_| ProtocolError::InvalidTextEncoding)?;
+            
+            Ok(ServerInit {
+                initial_res,
+                pixel_format,
+                name,
+            })
+        }
+        .boxed()
+    }
+}
+
 impl WriteMessage for ServerInit {
     fn write_to<'a, W>(self, stream: &'a mut W) -> BoxFuture<'a, Result<(), ProtocolError>>
     where
