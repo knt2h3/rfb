@@ -103,6 +103,25 @@ pub enum SecurityType {
     VncAuthentication,
 }
 
+impl ReadMessage for SecurityTypes {
+    fn read_from<'a, R>(stream: &'a mut R) -> BoxFuture<'a, Result<Self, ProtocolError>>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        async {
+            let n = stream.read_u8().await?;
+            let mut types = Vec::with_capacity(n as usize);
+            for _ in 0..n {
+                let t = SecurityType::read_from(stream).await?;
+                types.push(t);
+            }
+
+            Ok(SecurityTypes(types))
+        }
+        .boxed()
+    }
+}
+
 impl WriteMessage for SecurityTypes {
     fn write_to<'a, W>(self, stream: &'a mut W) -> BoxFuture<'a, Result<(), ProtocolError>>
     where
@@ -162,6 +181,28 @@ pub enum SecurityResult {
     Failure(String),
 }
 
+impl ReadMessage for SecurityResult {
+    fn read_from<'a, R>(stream: &'a mut R) -> BoxFuture<'a, Result<Self, ProtocolError>>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        async {
+            let flag = stream.read_u32().await?;
+            match flag {
+                0 => Ok(SecurityResult::Success),
+                _ => {
+                    let len = stream.read_u32().await?;
+                    let mut buf = vec![0u8; len as usize];
+                    stream.read_exact(&mut buf).await?;
+                    let s = String::from_utf8(buf).map_err(|_| ProtocolError::InvalidTextEncoding)?;
+                    Ok(SecurityResult::Failure(s))
+                }
+            }
+        }
+        .boxed()
+    }
+}
+
 impl WriteMessage for SecurityResult {
     fn write_to<'a, W>(self, stream: &'a mut W) -> BoxFuture<'a, Result<(), ProtocolError>>
     where
@@ -205,6 +246,20 @@ impl ReadMessage for ClientInit {
         .boxed()
     }
 }
+
+impl WriteMessage for ClientInit {
+    fn write_to<'a, W>(self, stream: &'a mut W) -> BoxFuture<'a, Result<(), ProtocolError>>
+    where
+        W: AsyncWrite + Unpin + Send,
+    {
+        async move {
+            stream.write_u8(self.shared as u8).await?;
+            Ok(())
+        }
+        .boxed()
+    }
+}
+
 
 // Section 7.3.2
 #[derive(Debug)]
