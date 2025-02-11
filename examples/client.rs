@@ -17,13 +17,14 @@ struct Args {
 
 async fn request_framebuffer(
     client: &mut Client<tokio::net::TcpStream>,
-    frame_number: usize
+    frame_number: usize,
+    resolution: Resolution,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("Requesting framebuffer update");
     let update = client.framebuffer_update_request(
         false,
         Position { x: 0, y: 0 },
-        Resolution { width: 1024, height: 768 },
+        resolution,
     ).await?;
 
     // Create an image buffer to store the pixels
@@ -146,10 +147,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize the VNC client
     let mut client = Client::init_conn(config, stream).await?;
 
+    let initial_resolution = client.get_initial_resolution().clone();
+
     // Request framebuffer updates 5 times
     for i in 1..=5 {
         info!("Update request #{}", i);
-        request_framebuffer(&mut client, i).await?;
+        request_framebuffer(&mut client, i, initial_resolution.clone()).await?;
     }
 
     Ok(())

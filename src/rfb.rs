@@ -265,9 +265,9 @@ impl WriteMessage for ClientInit {
 // Section 7.3.2
 #[derive(Debug)]
 pub struct ServerInit {
-    initial_res: Resolution,
-    pixel_format: PixelFormat,
-    name: String,
+    pub initial_res: Resolution,
+    pub pixel_format: PixelFormat,
+    pub name: String,
 }
 
 impl ServerInit {
