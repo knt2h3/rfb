@@ -42,3 +42,4 @@ anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 image = "0.25.1"
 tokio = { version = "1", features = ["full"] }
+png = "0.17.16"

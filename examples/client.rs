@@ -1,6 +1,6 @@
 use std::net::ToSocketAddrs;
 use clap::Parser;
-use log::{info, LevelFilter};
+use log::{info, warn, LevelFilter};
 use rfb::{
     client::{Client, VncClientConfig},
     rfb::{ProtoVersion, Position, Resolution, PixelFormat, ColorSpecification, ColorFormat},
@@ -49,20 +49,56 @@ async fn request_framebuffer(
             rfb::encodings::EncodingType::Raw => {
                 // Assuming RGB888 format (32-bit pixels, 8 bits per color)
                 let bytes_per_pixel = 4;
+                let expected_data_size = rect.dimensions.width as usize * rect.dimensions.height as usize * bytes_per_pixel;
+                
+                if rect.data.len() != expected_data_size {
+                    warn!(
+                        "Rectangle data size mismatch: expected {}, got {}",
+                        expected_data_size,
+                        rect.data.len()
+                    );
+                    continue;
+                }
+
                 for y in 0..rect.dimensions.height {
                     for x in 0..rect.dimensions.width {
-                        let pixel_idx = (y * rect.dimensions.width + x) as usize * bytes_per_pixel;
-                        if pixel_idx + 2 < rect.data.len() {
-                            // Convert coordinates safely
-                            let img_x = rect.position.x.max(0) as u32 + x as u32;
-                            let img_y = rect.position.y.max(0) as u32 + y as u32;
-                            if img_x < 1024 && img_y < 768 {
-                                // RGB888 format, assuming little-endian
-                                let r = rect.data[pixel_idx];
-                                let g = rect.data[pixel_idx + 1];
-                                let b = rect.data[pixel_idx + 2];
-                                img.put_pixel(img_x, img_y, Rgb([r, g, b]));
+                        // Calculate pixel index safely using checked arithmetic
+                        let row_offset = match (y as usize).checked_mul(rect.dimensions.width as usize) {
+                            Some(offset) => offset,
+                            None => {
+                                warn!("Integer overflow in row offset calculation");
+                                continue;
                             }
+                        };
+                        let pixel_offset = match row_offset.checked_add(x as usize) {
+                            Some(offset) => offset,
+                            None => {
+                                warn!("Integer overflow in pixel offset calculation");
+                                continue;
+                            }
+                        };
+                        let pixel_idx = match pixel_offset.checked_mul(bytes_per_pixel) {
+                            Some(idx) => idx,
+                            None => {
+                                warn!("Integer overflow in pixel index calculation");
+                                continue;
+                            }
+                        };
+
+                        if pixel_idx + 2 >= rect.data.len() {
+                            warn!("Pixel index out of bounds");
+                            continue;
+                        }
+
+                        // Convert coordinates safely
+                        let img_x = rect.position.x.max(0) as u32 + x as u32;
+                        let img_y = rect.position.y.max(0) as u32 + y as u32;
+                        if img_x < 1024 && img_y < 768 {
+                            // RGB888 format, assuming little-endian
+                            let b = rect.data[pixel_idx];
+                            let g = rect.data[pixel_idx + 1];
+                            let r = rect.data[pixel_idx + 2];
+                            img.put_pixel(img_x, img_y, Rgb([r, g, b]));
                         }
                     }
                 }
