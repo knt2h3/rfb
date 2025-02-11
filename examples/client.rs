@@ -21,6 +21,10 @@ async fn request_framebuffer(
     resolution: Resolution,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("Requesting framebuffer update");
+
+    let width = resolution.width as u32;
+    let height = resolution.height as u32;
+
     let update = client.framebuffer_update_request(
         false,
         Position { x: 0, y: 0 },
@@ -28,7 +32,7 @@ async fn request_framebuffer(
     ).await?;
 
     // Create an image buffer to store the pixels
-    let mut img = ImageBuffer::new(1024, 768);
+    let mut img = ImageBuffer::new(width, height);
 
     // Print information about the received rectangles
     info!("Received {} rectangles in the framebuffer update", update.rectangles.len());
@@ -94,7 +98,7 @@ async fn request_framebuffer(
                         // Convert coordinates safely
                         let img_x = rect.position.x.max(0) as u32 + x as u32;
                         let img_y = rect.position.y.max(0) as u32 + y as u32;
-                        if img_x < 1024 && img_y < 768 {
+                        if img_x < width && img_y < height {
                             // RGB888 format, assuming little-endian
                             let b = rect.data[pixel_idx];
                             let g = rect.data[pixel_idx + 1];
