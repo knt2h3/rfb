@@ -3,7 +3,7 @@ use clap::Parser;
 use log::{info, LevelFilter};
 use rfb::{
     client::{Client, VncClientConfig},
-    rfb::ProtoVersion,
+    rfb::{ProtoVersion, Position, Resolution},
 };
 
 #[derive(Parser, Debug)]
@@ -12,6 +12,32 @@ struct Args {
     /// VNC server address (e.g. "localhost:5900")
     #[arg(value_name = "HOST:PORT")]
     address: String,
+}
+
+async fn request_framebuffer(client: &mut Client<tokio::net::TcpStream>) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Requesting framebuffer update");
+    let update = client.framebuffer_update_request(
+        false,
+        Position { x: 0, y: 0 },
+        Resolution { width: 1024, height: 768 },
+    ).await?;
+
+    // Print information about the received rectangles
+    info!("Received {} rectangles in the framebuffer update", update.rectangles.len());
+    for (i, rect) in update.rectangles.iter().enumerate() {
+        let num_pixels = rect.dimensions.width as u64 * rect.dimensions.height as u64;
+        info!(
+            "Rectangle {}: position=({}, {}), size={}x{}, pixels={}, encoding={:?}",
+            i,
+            rect.position.x,
+            rect.position.y,
+            rect.dimensions.width,
+            rect.dimensions.height,
+            num_pixels,
+            rect.encoding_type
+        );
+    }
+    Ok(())
 }
 
 #[tokio::main]
@@ -43,28 +69,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize the VNC client
     let mut client = Client::init_conn(config, stream).await?;
 
-    // Request a framebuffer update (non-incremental)
-    info!("Requesting framebuffer update");
-    let update = client.framebuffer_update_request(
-        false,
-        rfb::rfb::Position { x: 0, y: 0 },
-        rfb::rfb::Resolution { width: 1024, height: 768 },
-    ).await?;
-
-    // Print information about the received rectangles
-    info!("Received {} rectangles in the framebuffer update", update.rectangles.len());
-    for (i, rect) in update.rectangles.iter().enumerate() {
-        let num_pixels = rect.dimensions.width as u64 * rect.dimensions.height as u64;
-        info!(
-            "Rectangle {}: position=({}, {}), size={}x{}, pixels={}, encoding={:?}",
-            i,
-            rect.position.x,
-            rect.position.y,
-            rect.dimensions.width,
-            rect.dimensions.height,
-            num_pixels,
-            rect.encoding_type
-        );
+    // Request framebuffer updates 5 times
+    for i in 1..=5 {
+        info!("Update request #{}", i);
+        request_framebuffer(&mut client).await?;
     }
 
     Ok(())
