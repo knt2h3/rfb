@@ -3,7 +3,7 @@ use clap::Parser;
 use log::{info, warn, LevelFilter};
 use rfb::{
     client::{Client, VncClientConfig},
-    rfb::{ProtoVersion, Position, Resolution, PixelFormat, ColorSpecification, ColorFormat},
+    rfb::{ProtoVersion, Position, Resolution},
 };
 use image::{ImageBuffer, Rgb};
 
