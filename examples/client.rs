@@ -51,8 +51,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rfb::rfb::Resolution { width: 1024, height: 768 },
     ).await?;
 
-    // Print the number of rectangles received
+    // Print information about the received rectangles
     info!("Received {} rectangles in the framebuffer update", update.rectangles.len());
+    for (i, rect) in update.rectangles.iter().enumerate() {
+        let num_pixels = rect.dimensions.width as u64 * rect.dimensions.height as u64;
+        info!(
+            "Rectangle {}: position=({}, {}), size={}x{}, pixels={}, encoding={:?}",
+            i,
+            rect.position.x,
+            rect.position.y,
+            rect.dimensions.width,
+            rect.dimensions.height,
+            num_pixels,
+            rect.encoding_type
+        );
+    }
 
     Ok(())
 }
