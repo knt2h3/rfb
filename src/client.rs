@@ -58,12 +58,15 @@ where
         let msg = ClientMessage::FramebufferUpdateRequest(FramebufferUpdateRequest { incremental, position, resolution });
         msg.write_to(&mut self.conn).await?;
 
+        // TODO: Handle the case where the server sends a FramebufferUpdate message
+
         let encoded = FramebufferUpdateEncoded::read_from(&mut self.conn).await?;
         Ok(encoded)
     }
 
-    pub async fn key_event(&mut self, is_pressed: bool, keysym: KeySym, keysym_raw: u32) -> Result<(), ProtocolError> {
-        let msg = ClientMessage::KeyEvent(KeyEvent { is_pressed, keysym, keysym_raw });
+    pub async fn key_event(&mut self, is_pressed: bool, keysym_raw: u32) -> Result<(), ProtocolError> {
+        let unused = KeySym::Ascii(ascii::AsciiChar::A);
+        let msg = ClientMessage::KeyEvent(KeyEvent { is_pressed, keysym: unused, keysym_raw });
         msg.write_to(&mut self.conn).await
     }
 

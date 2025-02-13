@@ -28,6 +28,9 @@ pub enum ProtocolError {
     #[error("unknown client message type ({0})")]
     UnknownClientMessageType(u8),
 
+    #[error("unknown server message type ({0})")]
+    UnknownServerMessageType(u8),
+
     #[error(transparent)]
     KeySymError(#[from] crate::keysym::KeySymError),
 
@@ -551,8 +554,13 @@ impl ReadMessage for FramebufferUpdateEncoded {
     {
         async move {
             // Read message type (0) and padding byte
-            stream.read_u8().await?;  // message type
+            let message_type = stream.read_u8().await?;  // message type
             stream.read_u8().await?;  // padding
+
+            if message_type != 0 {
+                // TODO: This should really be UnknownServerMessageType
+                return Err(ProtocolError::UnknownServerMessageType(message_type));
+            }
 
             let n_rect = stream.read_u16().await?;
             let mut rectangles = Vec::with_capacity(n_rect as usize);
