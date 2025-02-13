@@ -1,8 +1,10 @@
 use std::net::SocketAddr;
 use log::{error, info, debug};
 use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncWrite};
-use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, Resolution, SecurityResult, SecurityType, SecurityTypes, ServerInit, WriteMessage}};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt};
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, CutText, FramebufferUpdate, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, Resolution, SecurityResult, SecurityType, SecurityTypes, ServerInit, SetColorMapEntries, WriteMessage, _ServerMessage}};
 
 /// Immutable state
 pub struct VncClientConfig {
@@ -17,6 +19,14 @@ pub struct Client<C> {
     config: VncClientConfig,
     conn: C,
     server_init: ServerInit,
+}
+
+pub struct ClientReadHalf<C> {
+    conn: tokio::io::ReadHalf<C>,
+}
+
+pub struct ClientWriteHalf<C> {
+    conn: tokio::io::WriteHalf<C>,
 }
 
 impl<C> Client<C>
@@ -44,6 +54,16 @@ where
         &self.server_init.pixel_format
     }
 
+    pub fn split(self) -> (ClientReadHalf<C>, ClientWriteHalf<C>) {
+        let (rh, wh) = tokio::io::split(self.conn);
+        (ClientReadHalf { conn: rh }, ClientWriteHalf { conn: wh })
+    } 
+}
+
+impl<C> ClientWriteHalf<C>
+where
+    C: AsyncRead + AsyncWrite + Unpin + Send,
+{
     pub async fn set_pixel_format(&mut self, pixel_format: PixelFormat) -> Result<(), ProtocolError> {
         let msg = ClientMessage::SetPixelFormat(pixel_format);
         msg.write_to(&mut self.conn).await
@@ -54,14 +74,9 @@ where
         msg.write_to(&mut self.conn).await
     }
 
-    pub async fn framebuffer_update_request(&mut self, incremental: bool, position: Position, resolution: Resolution) -> Result<FramebufferUpdateEncoded, ProtocolError> {
+    pub async fn framebuffer_update_request(&mut self, incremental: bool, position: Position, resolution: Resolution) -> Result<(), ProtocolError> {
         let msg = ClientMessage::FramebufferUpdateRequest(FramebufferUpdateRequest { incremental, position, resolution });
-        msg.write_to(&mut self.conn).await?;
-
-        // TODO: Handle the case where the server sends a FramebufferUpdate message
-
-        let encoded = FramebufferUpdateEncoded::read_from(&mut self.conn).await?;
-        Ok(encoded)
+        msg.write_to(&mut self.conn).await
     }
 
     pub async fn key_event(&mut self, is_pressed: bool, keysym_raw: u32) -> Result<(), ProtocolError> {
@@ -79,12 +94,51 @@ where
         let msg = ClientMessage::ClientCutText(text);
         msg.write_to(&mut self.conn).await
     }
+}
 
-    pub fn split(self) {
-        let (rh, wh) = tokio::io::split(self.conn);
-        // (Client { config: self.config, conn: rh }, Client { config: self.config, conn: wh })
-    } 
+pub enum ServerMessage {
+    FramebufferUpdate(FramebufferUpdateEncoded),
+    // SetColorMapEntries(SetColorMapEntries),
+    Bell,
+    // ServerCutText(CutText),
+}
 
+#[async_trait::async_trait]
+impl ReadMessage for ServerMessage {
+    fn read_from<'a, R>(stream: &'a mut R) -> BoxFuture<'a, Result<Self, ProtocolError>>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        async move {
+            let msg_type = stream.read_u8().await?;
+            match msg_type {
+                0 => {
+                    let update = FramebufferUpdateEncoded::read_from(stream).await?;
+                    Ok(ServerMessage::FramebufferUpdate(update))
+                }
+                // 1 => {
+                //     let entries = SetColorMapEntries::read_from(stream).await?;
+                //     Ok(ServerMessage::SetColorMapEntries(entries))
+                // }
+                2 => Ok(ServerMessage::Bell),
+                // 3 => {
+                //     let text = CutText::read_from(stream).await?;
+                //     Ok(ServerMessage::ServerCutText(text))
+                // }
+                _ => Err(ProtocolError::UnknownServerMessageType(msg_type)),
+            }
+        }.boxed()
+    }
+}
+
+impl<C> ClientReadHalf<C>
+where
+    C: AsyncRead + AsyncWrite + Unpin + Send,
+{
+    pub async fn read_message(&mut self) -> Result<ServerMessage, ProtocolError> {
+        let msg = ServerMessage::read_from(&mut self.conn).await?;
+        Ok(msg)
+    }
 }
 
 #[derive(Debug, Error)]
