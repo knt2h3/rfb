@@ -7,6 +7,7 @@
 use bitflags::bitflags;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use log::warn;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -506,8 +507,10 @@ impl ReadMessage for RectangleEncoded {
                     stream.read_exact(&mut data).await?;
                     data
                 }
-                _ => {
-                    unimplemented!()
+                ref other => {
+                    // unimplemented!("Unsupported encoding type: {:?} [width: {}, height: {}]", other, width, height);
+                    warn!("Unsupported encoding type: {:?} [width: {}, height: {}]", other, width, height);
+                    vec![]
                 }
             };
 

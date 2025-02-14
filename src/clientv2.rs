@@ -4,7 +4,7 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt};
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, CutText, FramebufferUpdate, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, Resolution, SecurityResult, SecurityType, SecurityTypes, ServerInit, SetColorMapEntries, WriteMessage, _ServerMessage}};
+use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, CutText, FramebufferUpdate, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, RectangleEncoded, Resolution, SecurityResult, SecurityType, SecurityTypes, ServerInit, SetColorMapEntries, WriteMessage, _ServerMessage}};
 
 /// Immutable state
 pub struct VncClientConfig {
@@ -113,8 +113,20 @@ impl ReadMessage for ServerMessage {
             let msg_type = stream.read_u8().await?;
             match msg_type {
                 0 => {
-                    let update = FramebufferUpdateEncoded::read_from(stream).await?;
-                    Ok(ServerMessage::FramebufferUpdate(update))
+                    // We cannot use the FramebufferUpdateEncoded::read_from method here, because it will read the message type as well
+                    // let update = FramebufferUpdateEncoded::read_from(stream).await?;
+                    // Ok(ServerMessage::FramebufferUpdate(update))
+                    stream.read_u8().await?;  // padding
+
+                    let n_rect = stream.read_u16().await?;
+                    let mut rectangles = Vec::with_capacity(n_rect as usize);
+
+                    for _ in 0..n_rect {
+                        let rect = RectangleEncoded::read_from(stream).await?;
+                        rectangles.push(rect);
+                    }
+
+                    Ok(ServerMessage::FramebufferUpdate(FramebufferUpdateEncoded { rectangles }))
                 }
                 // 1 => {
                 //     let entries = SetColorMapEntries::read_from(stream).await?;

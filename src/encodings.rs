@@ -11,6 +11,35 @@ use crate::{
 
 use EncodingType::*;
 
+// #define VNC_ENCODING_RAW                  0x00000000
+// #define VNC_ENCODING_COPYRECT             0x00000001
+// #define VNC_ENCODING_RRE                  0x00000002
+// #define VNC_ENCODING_CORRE                0x00000004
+// #define VNC_ENCODING_HEXTILE              0x00000005
+// #define VNC_ENCODING_ZLIB                 0x00000006
+// #define VNC_ENCODING_TIGHT                0x00000007
+// #define VNC_ENCODING_ZLIBHEX              0x00000008
+// #define VNC_ENCODING_TRLE                 0x0000000f
+// #define VNC_ENCODING_ZRLE                 0x00000010
+// #define VNC_ENCODING_ZYWRLE               0x00000011
+// #define VNC_ENCODING_COMPRESSLEVEL0       0xFFFFFF00 /* -256 */
+// #define VNC_ENCODING_QUALITYLEVEL0        0xFFFFFFE0 /* -32  */
+// #define VNC_ENCODING_XCURSOR              0xFFFFFF10 /* -240 */
+// #define VNC_ENCODING_RICH_CURSOR          0xFFFFFF11 /* -239 */
+// #define VNC_ENCODING_POINTER_POS          0xFFFFFF18 /* -232 */
+// #define VNC_ENCODING_LASTRECT             0xFFFFFF20 /* -224 */
+// #define VNC_ENCODING_DESKTOPRESIZE        0xFFFFFF21 /* -223 */
+// #define VNC_ENCODING_POINTER_TYPE_CHANGE  0XFFFFFEFF /* -257 */
+// #define VNC_ENCODING_EXT_KEY_EVENT        0XFFFFFEFE /* -258 */
+// #define VNC_ENCODING_AUDIO                0XFFFFFEFD /* -259 */
+// #define VNC_ENCODING_TIGHT_PNG            0xFFFFFEFC /* -260 */
+// #define VNC_ENCODING_LED_STATE            0XFFFFFEFB /* -261 */
+// #define VNC_ENCODING_DESKTOP_RESIZE_EXT   0XFFFFFECC /* -308 */
+// #define VNC_ENCODING_XVP                  0XFFFFFECB /* -309 */
+// #define VNC_ENCODING_ALPHA_CURSOR         0XFFFFFEC6 /* -314 */
+// #define VNC_ENCODING_WMVi                 0x574D5669
+// #define VNC_ENCODING_CLIPBOARD_EXT        0xc0a1e5ce
+
 #[derive(Debug)]
 #[allow(unused)]
 pub enum EncodingType {
@@ -27,6 +56,8 @@ pub enum EncodingType {
     JPEG,
     Zlib,
     CursorWithAlpha,
+    ContinuousUpdates,
+    ExtendedDesktopSize,
     Other(i32),
 }
 
@@ -59,6 +90,10 @@ impl From<EncodingType> for i32 {
             JPEG => 21,
             Zlib => 6,
             CursorWithAlpha => -314,
+            ContinuousUpdates => 150,
+            // 0xFFFFFF21? -223?
+            ExtendedDesktopSize => 22015,
+            // ExtendedDesktopSize => -223,
             Other(n) => n,
         }
     }
@@ -80,6 +115,8 @@ impl From<i32> for EncodingType {
             21 => JPEG,
             6 => Zlib,
             -314 => CursorWithAlpha,
+            150 => ContinuousUpdates,
+            22015 => ExtendedDesktopSize,
             v => EncodingType::Other(v),
         }
     }
