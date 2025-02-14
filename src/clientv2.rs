@@ -4,7 +4,7 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt};
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, CutText, FramebufferUpdate, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, RectangleEncoded, Resolution, SecurityResult, SecurityType, SecurityTypes, ServerInit, SetColorMapEntries, WriteMessage, _ServerMessage}};
+use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, FramebufferUpdate, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, RectangleEncoded, Resolution, SecurityResult, SecurityType, SecurityTypes, ServerInit, SetColorMapEntries, WriteMessage, _ServerMessage}};
 
 /// Immutable state
 pub struct VncClientConfig {
@@ -110,7 +110,12 @@ pub enum ServerMessage {
     FramebufferUpdate(FramebufferUpdateEncoded),
     // SetColorMapEntries(SetColorMapEntries),
     Bell,
-    // ServerCutText(CutText),
+    ServerCutText(CutText),
+}
+
+#[derive(Debug)]
+pub struct CutText {
+    text: Vec<u8>,
 }
 
 #[async_trait::async_trait]
@@ -143,10 +148,21 @@ impl ReadMessage for ServerMessage {
                 //     Ok(ServerMessage::SetColorMapEntries(entries))
                 // }
                 2 => Ok(ServerMessage::Bell),
-                // 3 => {
-                //     let text = CutText::read_from(stream).await?;
-                //     Ok(ServerMessage::ServerCutText(text))
-                // }
+                3 => {
+                    // https://vncdotool.readthedocs.io/en/0.8.0/rfbproto.html#servercuttext
+                    // let text = CutText::read_from(stream).await?;
+                    // three bytes of padding
+                    let mut padding = [0_u8; 3];
+                    stream.read_exact(&mut padding).await?;
+
+                    let length = stream.read_u32().await?;
+                    let mut text = vec![0_u8; length as usize];
+                    stream.read_exact(&mut text).await?;
+
+                    let cut_text = CutText { text };
+
+                    Ok(ServerMessage::ServerCutText(cut_text))
+                }
                 _ => Err(ProtocolError::UnknownServerMessageType(msg_type)),
             }
         }.boxed()

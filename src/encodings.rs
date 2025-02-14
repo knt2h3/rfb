@@ -57,7 +57,8 @@ pub enum EncodingType {
     Zlib,
     CursorWithAlpha,
     ContinuousUpdates,
-    ExtendedDesktopSize,
+    // ExtendedDesktopSize,
+    ExtendedKeyEvents,
     Other(i32),
 }
 
@@ -92,7 +93,8 @@ impl From<EncodingType> for i32 {
             CursorWithAlpha => -314,
             ContinuousUpdates => 150,
             // 0xFFFFFF21? -223?
-            ExtendedDesktopSize => 22015,
+            // ExtendedDesktopSize => 22015,
+            ExtendedKeyEvents => -258,
             // ExtendedDesktopSize => -223,
             Other(n) => n,
         }
@@ -116,7 +118,8 @@ impl From<i32> for EncodingType {
             6 => Zlib,
             -314 => CursorWithAlpha,
             150 => ContinuousUpdates,
-            22015 => ExtendedDesktopSize,
+            // 22015 => ExtendedDesktopSize,
+            -258 => ExtendedKeyEvents,
             v => EncodingType::Other(v),
         }
     }

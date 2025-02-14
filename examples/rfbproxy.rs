@@ -222,6 +222,12 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                                 break;
                             }
                         }
+                        ServerMessage::ServerCutText(cut_text) => {
+                            if let Err(e) = client_write.write_u8(3).await {
+                                error!("Error writing server cut text message: {}", e);
+                                break;
+                            }
+                        }
                     }
                 }
                 Err(e) => {
