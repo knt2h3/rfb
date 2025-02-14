@@ -1,11 +1,13 @@
 use std::net::ToSocketAddrs;
 use clap::Parser;
-use log::{info, warn, LevelFilter};
+use log::{info, warn, error, LevelFilter};
+use rfb::rfb::{SecurityResult, SecurityType, SecurityTypes};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncWriteExt, AsyncWrite};
 use rfb::{
-    clientv2::{Client, ServerMessage, VncClientConfig},
-    rfb::{Position, ProtoVersion, Resolution},
+    clientv2::{Client, ServerMessage, VncClientConfig, ClientReadHalf, ClientWriteHalf},
+    rfb::{Position, ProtoVersion, Resolution, ClientMessage, ReadMessage, WriteMessage, RectangleEncoded},
 };
-use image::{ImageBuffer, Rgb};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -29,32 +31,206 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse command line arguments
     let args = Args::parse();
 
-    /*
-    // Parse and resolve the address
-    let addr = args.address
+    // Parse and resolve the server address
+    let server_addr = args.address
         .to_socket_addrs()?
         .next()
-        .ok_or("Failed to resolve address")?;
+        .ok_or("Failed to resolve server address")?;
 
-    // Connect to the VNC server
-    info!("Connecting to VNC server at {}", addr);
-    let stream = tokio::net::TcpStream::connect(addr).await?;
+    // Create TCP listener for proxy
+    let listener = TcpListener::bind(&args.proxy).await?;
+    info!("RFB proxy listening on {}", args.proxy);
 
-    stream.set_nodelay(true)?;
+    // Accept incoming connections
+    loop {
+        let (client_stream, client_addr) = listener.accept().await?;
+        info!("New client connection from {}", client_addr);
 
-    // Create client configuration
+        // Clone server address for this connection
+        let server_addr = server_addr;
+
+        // Spawn a new task to handle this connection
+        tokio::spawn(async move {
+            if let Err(e) = handle_connection(client_stream, server_addr).await {
+                error!("Error handling connection from {}: {}", client_addr, e);
+            }
+        });
+    }
+}
+
+async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+    // Connect to VNC server
+    let mut server_stream = TcpStream::connect(server_addr).await?;
+    server_stream.set_nodelay(true)?;
+
+    // TODO: proxy handshake
+    let server_version = ProtoVersion::read_from(&mut server_stream).await?;
+    info!("Rx: ServerVersion={:?}", server_version);
+    server_version.write_to(&mut client_stream).await?;
+
+    let client_version = ProtoVersion::read_from(&mut client_stream).await?;
+    info!("Tx: ClientVersion={:?}", client_version);
+    client_version.write_to(&mut server_stream).await?;
+
+    let supported_types = SecurityTypes::read_from(&mut server_stream).await?;
+    info!("Rx: Server SupportedSecurityTypes={:?}", supported_types);
+    supported_types.write_to(&mut client_stream).await?;
+
+    let client_choice = SecurityType::read_from(&mut client_stream).await?;
+    client_choice.write_to(&mut server_stream).await?;
+
+    let security_result = SecurityResult::read_from(&mut server_stream).await?;
+    info!("Rx: SecurityResult={:?}", security_result);
+    // assert!(matches!(res, SecurityResult::Success));
+    security_result.write_to(&mut client_stream).await?;
+
+    // TODO: proxy init
+    // todo!()
+
+    // Create VNC client config
     let config = VncClientConfig {
-        version: ProtoVersion::Rfb38,
-        shared: false,
+        version: client_version,
+        shared: true, // Allow shared connections
     };
 
-    // Initialize the VNC client
-    let mut client = Client::init_conn(config, stream).await?;
+    // Initialize VNC client connection
+    let client = Client::init_conn(config, server_stream).await?;
+    let (mut server_read, mut server_write) = client.split();
 
-    // let initial_resolution = client.get_initial_resolution().clone();
-    // let (mut read_half, mut write_half) = client.split();
+    // Split client stream
+    let (mut client_read, mut client_write) = tokio::io::split(client_stream);
 
-    */
+    // Spawn task to forward client -> server messages
+    let client_to_server = tokio::spawn(async move {
+        loop {
+            match ClientMessage::read_from(&mut client_read).await {
+                Ok(msg) => {
+                    match msg {
+                        ClientMessage::SetPixelFormat(pf) => {
+                            if let Err(e) = server_write.set_pixel_format(pf).await {
+                                error!("Error forwarding SetPixelFormat: {}", e);
+                                break;
+                            }
+                        }
+                        ClientMessage::SetEncodings(enc) => {
+                            if let Err(e) = server_write.set_encodings(enc).await {
+                                error!("Error forwarding SetEncodings: {}", e);
+                                break;
+                            }
+                        }
+                        ClientMessage::FramebufferUpdateRequest(req) => {
+                            if let Err(e) = server_write.framebuffer_update_request(req.incremental, req.position, req.resolution).await {
+                                error!("Error forwarding FramebufferUpdateRequest: {}", e);
+                                break;
+                            }
+                        }
+                        ClientMessage::KeyEvent(ke) => {
+                            if let Err(e) = server_write.key_event(ke.is_pressed, ke.keysym_raw).await {
+                                error!("Error forwarding KeyEvent: {}", e);
+                                break;
+                            }
+                        }
+                        ClientMessage::PointerEvent(pe) => {
+                            if let Err(e) = server_write.pointer_event(pe.position, pe.pressed).await {
+                                error!("Error forwarding PointerEvent: {}", e);
+                                break;
+                            }
+                        }
+                        ClientMessage::ClientCutText(text) => {
+                            if let Err(e) = server_write.client_cut_text(text).await {
+                                error!("Error forwarding ClientCutText: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Error reading client message: {}", e);
+                    break;
+                }
+            }
+        }
+    });
+
+    // Forward server -> client messages
+    let server_to_client = tokio::spawn(async move {
+        loop {
+            match server_read.read_message().await {
+                Ok(msg) => {
+                    match msg {
+                        ServerMessage::FramebufferUpdate(update) => {
+                            // Write message type and padding
+                            if let Err(e) = client_write.write_u8(0).await {
+                                error!("Error writing message type: {}", e);
+                                break;
+                            }
+                            if let Err(e) = client_write.write_u8(0).await {
+                                error!("Error writing padding: {}", e);
+                                break;
+                            }
+
+                            // Write number of rectangles
+                            if let Err(e) = client_write.write_u16(update.rectangles.len() as u16).await {
+                                error!("Error writing rectangle count: {}", e);
+                                break;
+                            }
+
+                            // Write rectangles
+                            for rect in update.rectangles {
+                                // Write position
+                                if let Err(e) = client_write.write_u16(rect.position.x).await {
+                                    error!("Error writing rectangle x: {}", e);
+                                    break;
+                                }
+                                if let Err(e) = client_write.write_u16(rect.position.y).await {
+                                    error!("Error writing rectangle y: {}", e);
+                                    break;
+                                }
+                                
+                                // Write dimensions
+                                if let Err(e) = client_write.write_u16(rect.dimensions.width).await {
+                                    error!("Error writing rectangle width: {}", e);
+                                    break;
+                                }
+                                if let Err(e) = client_write.write_u16(rect.dimensions.height).await {
+                                    error!("Error writing rectangle height: {}", e);
+                                    break;
+                                }
+
+                                // Write encoding type
+                                if let Err(e) = client_write.write_i32(rect.encoding_type.into()).await {
+                                    error!("Error writing encoding type: {}", e);
+                                    break;
+                                }
+
+                                // Write rectangle data
+                                if let Err(e) = client_write.write_all(&rect.data).await {
+                                    error!("Error writing rectangle data: {}", e);
+                                    break;
+                                }
+                            }
+                        }
+                        ServerMessage::Bell => {
+                            if let Err(e) = client_write.write_u8(2).await {
+                                error!("Error writing bell message: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Error reading server message: {}", e);
+                    break;
+                }
+            }
+        }
+    });
+
+    // Wait for either direction to complete
+    tokio::select! {
+        _ = client_to_server => info!("Client to server connection closed"),
+        _ = server_to_client => info!("Server to client connection closed"),
+    }
 
     Ok(())
 }
