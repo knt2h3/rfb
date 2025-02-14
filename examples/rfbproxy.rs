@@ -100,8 +100,9 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
     };
 
     // Initialize VNC client connection
-    let client = Client::create_from_initialized_conn(config, server_stream, server_init).await?;
-    let (mut server_read, mut server_write) = client.split();
+    // let client = Client::create_from_initialized_conn(config, server_stream, server_init).await?;
+    // let (mut server_read, mut server_write) = client.split();
+    let (mut server_read, mut server_write) = tokio::io::split(server_stream);
 
     // Split client stream
     let (mut client_read, mut client_write) = tokio::io::split(client_stream);
@@ -113,41 +114,48 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                 Ok(msg) => {
                     match msg {
                         ClientMessage::SetPixelFormat(pf) => {
-                            if let Err(e) = server_write.set_pixel_format(pf).await {
-                                error!("Error forwarding SetPixelFormat: {}", e);
-                                break;
-                            }
+                            todo!("pixel format");
+                            // if let Err(e) = server_write.set_pixel_format(pf).await {
+                            //     error!("Error forwarding SetPixelFormat: {}", e);
+                            //     break;
+                            // }
                         }
                         ClientMessage::SetEncodings(enc) => {
-                            if let Err(e) = server_write.set_encodings(enc).await {
-                                error!("Error forwarding SetEncodings: {}", e);
-                                break;
-                            }
+                            info!("Forwarding SetEncodings: {:?}", enc);
+                            ClientMessage::SetEncodings(enc).write_to(&mut server_write).await.unwrap();
+                            // if let Err(e) = server_write.set_encodings(enc).await {
+                            //     error!("Error forwarding SetEncodings: {}", e);
+                            //     break;
+                            // }
                         }
                         ClientMessage::FramebufferUpdateRequest(req) => {
                             info!("Forwarding FramebufferUpdateRequest: {:?}", req);
-                            if let Err(e) = server_write.framebuffer_update_request(req.incremental, req.position, req.resolution).await {
-                                error!("Error forwarding FramebufferUpdateRequest: {}", e);
-                                break;
-                            }
+                            ClientMessage::FramebufferUpdateRequest(req).write_to(&mut server_write).await.unwrap();
+                            // if let Err(e) = server_write.framebuffer_update_request(req.incremental, req.position, req.resolution).await {
+                            //     error!("Error forwarding FramebufferUpdateRequest: {}", e);
+                            //     break;
+                            // }
                         }
                         ClientMessage::KeyEvent(ke) => {
-                            if let Err(e) = server_write.key_event(ke.is_pressed, ke.keysym_raw).await {
-                                error!("Error forwarding KeyEvent: {}", e);
-                                break;
-                            }
+                            todo!("key event");
+                            // if let Err(e) = server_write.key_event(ke.is_pressed, ke.keysym_raw).await {
+                            //     error!("Error forwarding KeyEvent: {}", e);
+                            //     break;
+                            // }
                         }
                         ClientMessage::PointerEvent(pe) => {
-                            if let Err(e) = server_write.pointer_event(pe.position, pe.pressed).await {
-                                error!("Error forwarding PointerEvent: {}", e);
-                                break;
-                            }
+                            todo!("pointer event");
+                            // if let Err(e) = server_write.pointer_event(pe.position, pe.pressed).await {
+                            //     error!("Error forwarding PointerEvent: {}", e);
+                            //     break;
+                            // }
                         }
                         ClientMessage::ClientCutText(text) => {
-                            if let Err(e) = server_write.client_cut_text(text).await {
-                                error!("Error forwarding ClientCutText: {}", e);
-                                break;
-                            }
+                            todo!("client cut text");
+                            // if let Err(e) = server_write.client_cut_text(text).await {
+                            //     error!("Error forwarding ClientCutText: {}", e);
+                            //     break;
+                            // }
                         }
                     }
                 }
@@ -162,7 +170,7 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
     // Forward server -> client messages
     let server_to_client = tokio::spawn(async move {
         loop {
-            match server_read.read_message().await {
+            match ServerMessage::read_from(&mut server_read).await {
                 Ok(msg) => {
                     match msg {
                         ServerMessage::FramebufferUpdate(update) => {
