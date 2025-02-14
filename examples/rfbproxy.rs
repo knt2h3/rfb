@@ -125,6 +125,7 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                             }
                         }
                         ClientMessage::FramebufferUpdateRequest(req) => {
+                            info!("Forwarding FramebufferUpdateRequest: {:?}", req);
                             if let Err(e) = server_write.framebuffer_update_request(req.incremental, req.position, req.resolution).await {
                                 error!("Error forwarding FramebufferUpdateRequest: {}", e);
                                 break;
