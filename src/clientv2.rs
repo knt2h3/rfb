@@ -46,6 +46,16 @@ where
         Ok(client)
     }
 
+    pub async fn create_from_initialized_conn(config: VncClientConfig, conn: C, server_init: ServerInit) -> Result<Self, HandshakeError> {
+        let client = Client {
+            config,
+            conn,
+            server_init,
+        };
+
+        Ok(client)
+    }
+
     pub fn get_initial_resolution(&self) -> &Resolution {
         &self.server_init.initial_res
     }

@@ -231,7 +231,7 @@ impl WriteMessage for SecurityResult {
 }
 
 // Section 7.3.1
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ClientInit {
     pub shared: bool,
 }
@@ -267,7 +267,7 @@ impl WriteMessage for ClientInit {
 
 
 // Section 7.3.2
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ServerInit {
     pub initial_res: Resolution,
     pub pixel_format: PixelFormat,

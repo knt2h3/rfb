@@ -1,7 +1,7 @@
 use std::net::ToSocketAddrs;
 use clap::Parser;
 use log::{info, warn, error, LevelFilter};
-use rfb::rfb::{SecurityResult, SecurityType, SecurityTypes};
+use rfb::rfb::{ClientInit, SecurityResult, SecurityType, SecurityTypes, ServerInit};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncWriteExt, AsyncWrite};
 use rfb::{
@@ -13,11 +13,11 @@ use rfb::{
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// VNC server address (e.g. "localhost:5900")
-    #[arg(value_name = "HOST:PORT")]
+    #[arg(value_name = "SERVER_HOST:SERVER_PORT")]
     address: String,
 
     /// Proxy listen address (e.g. "localhost:5901")
-    #[arg(value_name = "HOST:PORT")]
+    #[arg(value_name = "PROXY_HOST:PROXY_PORT")]
     proxy: String,
 }
 
@@ -85,16 +85,22 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
     security_result.write_to(&mut client_stream).await?;
 
     // TODO: proxy init
-    // todo!()
+    let client_init = ClientInit::read_from(&mut client_stream).await?;
+    info!("Rx: ClientInit={:?}", client_init);
+    client_init.clone().write_to(&mut server_stream).await?;
+
+    let server_init = ServerInit::read_from(&mut server_stream).await?;
+    info!("Rx: ServerInit={:?}", server_init);
+    server_init.clone().write_to(&mut client_stream).await?;
 
     // Create VNC client config
     let config = VncClientConfig {
         version: client_version,
-        shared: true, // Allow shared connections
+        shared: client_init.shared,
     };
 
     // Initialize VNC client connection
-    let client = Client::init_conn(config, server_stream).await?;
+    let client = Client::create_from_initialized_conn(config, server_stream, server_init).await?;
     let (mut server_read, mut server_write) = client.split();
 
     // Split client stream
