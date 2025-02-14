@@ -114,7 +114,8 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                 Ok(msg) => {
                     match msg {
                         ClientMessage::SetPixelFormat(pf) => {
-                            todo!("pixel format");
+                            info!("Forwarding SetPixelFormat: {:?}", pf);
+                            ClientMessage::SetPixelFormat(pf).write_to(&mut server_write).await.unwrap();
                             // if let Err(e) = server_write.set_pixel_format(pf).await {
                             //     error!("Error forwarding SetPixelFormat: {}", e);
                             //     break;
@@ -137,21 +138,24 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                             // }
                         }
                         ClientMessage::KeyEvent(ke) => {
-                            todo!("key event");
+                            info!("Forwarding KeyEvent: {:?}", ke);
+                            ClientMessage::KeyEvent(ke).write_to(&mut server_write).await.unwrap();
                             // if let Err(e) = server_write.key_event(ke.is_pressed, ke.keysym_raw).await {
                             //     error!("Error forwarding KeyEvent: {}", e);
                             //     break;
                             // }
                         }
                         ClientMessage::PointerEvent(pe) => {
-                            todo!("pointer event");
+                            info!("Forwarding PointerEvent: {:?}", pe);
+                            ClientMessage::PointerEvent(pe).write_to(&mut server_write).await.unwrap();
                             // if let Err(e) = server_write.pointer_event(pe.position, pe.pressed).await {
                             //     error!("Error forwarding PointerEvent: {}", e);
                             //     break;
                             // }
                         }
                         ClientMessage::ClientCutText(text) => {
-                            todo!("client cut text");
+                            info!("Forwarding ClientCutText: {:?}", text);
+                            ClientMessage::ClientCutText(text).write_to(&mut server_write).await.unwrap();
                             // if let Err(e) = server_write.client_cut_text(text).await {
                             //     error!("Error forwarding ClientCutText: {}", e);
                             //     break;
