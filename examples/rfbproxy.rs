@@ -1,7 +1,8 @@
 use std::net::ToSocketAddrs;
 use clap::Parser;
 use log::{info, warn, error, LevelFilter};
-use rfb::rfb::{ClientInit, SecurityResult, SecurityType, SecurityTypes, ServerInit};
+use rfb::encodings::EncodingType;
+use rfb::rfb::{ClientInit, SecurityResult, SecurityType, SecurityTypes, ServerInit, FRAMEBUFFER_UPDATE_MESSAGE_TYPE};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncWriteExt, AsyncWrite};
 use rfb::{
@@ -130,7 +131,7 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                             // }
                         }
                         ClientMessage::FramebufferUpdateRequest(req) => {
-                            info!("Forwarding FramebufferUpdateRequest: {:?}", req);
+                            info!("Forwarding (Client->Server) FramebufferUpdateRequest: {:?}", req);
                             ClientMessage::FramebufferUpdateRequest(req).write_to(&mut server_write).await.unwrap();
                             // if let Err(e) = server_write.framebuffer_update_request(req.incremental, req.position, req.resolution).await {
                             //     error!("Error forwarding FramebufferUpdateRequest: {}", e);
@@ -138,7 +139,7 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                             // }
                         }
                         ClientMessage::KeyEvent(ke) => {
-                            info!("Forwarding KeyEvent: {:?}", ke);
+                            info!("Forwarding (Client->Server) KeyEvent: {:?}", ke);
                             ClientMessage::KeyEvent(ke).write_to(&mut server_write).await.unwrap();
                             // if let Err(e) = server_write.key_event(ke.is_pressed, ke.keysym_raw).await {
                             //     error!("Error forwarding KeyEvent: {}", e);
@@ -146,7 +147,7 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                             // }
                         }
                         ClientMessage::PointerEvent(pe) => {
-                            info!("Forwarding PointerEvent: {:?}", pe);
+                            info!("Forwarding (Client->Server) PointerEvent: {:?}", pe);
                             ClientMessage::PointerEvent(pe).write_to(&mut server_write).await.unwrap();
                             // if let Err(e) = server_write.pointer_event(pe.position, pe.pressed).await {
                             //     error!("Error forwarding PointerEvent: {}", e);
@@ -154,7 +155,7 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                             // }
                         }
                         ClientMessage::ClientCutText(text) => {
-                            info!("Forwarding ClientCutText: {:?}", text);
+                            info!("Forwarding (Client->Server) ClientCutText: {:?}", text);
                             ClientMessage::ClientCutText(text).write_to(&mut server_write).await.unwrap();
                             // if let Err(e) = server_write.client_cut_text(text).await {
                             //     error!("Error forwarding ClientCutText: {}", e);
@@ -178,8 +179,10 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                 Ok(msg) => {
                     match msg {
                         ServerMessage::FramebufferUpdate(update) => {
+                            info!("Forwarding (Server->Client) FramebufferUpdate: rectangles={}, encoding_types={:?}", update.rectangles.len(), update.rectangles.iter().map(|r| r.encoding_type).collect::<Vec<_>>());
+
                             // Write message type and padding
-                            if let Err(e) = client_write.write_u8(0).await {
+                            if let Err(e) = client_write.write_u8(FRAMEBUFFER_UPDATE_MESSAGE_TYPE).await {
                                 error!("Error writing message type: {}", e);
                                 break;
                             }
@@ -190,12 +193,15 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
 
                             // Write number of rectangles
                             if let Err(e) = client_write.write_u16(update.rectangles.len() as u16).await {
+                            // if let Err(e) = client_write.write_u16_le(update.rectangles.len() as u16).await {
                                 error!("Error writing rectangle count: {}", e);
                                 break;
                             }
 
                             // Write rectangles
                             for rect in update.rectangles {
+                                info!("Forwarding Rectangle: {:?}", rect.encoding_type);
+
                                 // Write position
                                 if let Err(e) = client_write.write_u16(rect.position.x).await {
                                     error!("Error writing rectangle x: {}", e);
@@ -222,6 +228,11 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                                     break;
                                 }
 
+                                if let EncodingType::QemuExtendedKeyEvents = rect.encoding_type {
+                                    info!("QemuExtendedKeyEvents - no data to write");
+                                    continue;
+                                }
+
                                 // Write rectangle data
                                 if let Err(e) = client_write.write_all(&rect.data).await {
                                     error!("Error writing rectangle data: {}", e);
@@ -230,12 +241,14 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                             }
                         }
                         ServerMessage::Bell => {
+                            info!("Forwarding Bell");
                             if let Err(e) = client_write.write_u8(2).await {
                                 error!("Error writing bell message: {}", e);
                                 break;
                             }
                         }
                         ServerMessage::ServerCutText(cut_text) => {
+                            info!("Forwarding ServerCutText: {:?}", cut_text);
                             if let Err(e) = client_write.write_u8(3).await {
                                 error!("Error writing server cut text message: {}", e);
                                 break;

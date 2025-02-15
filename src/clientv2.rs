@@ -127,6 +127,7 @@ impl ReadMessage for ServerMessage {
         async move {
             let msg_type = stream.read_u8().await?;
             match msg_type {
+                // FramebufferUpdate
                 0 => {
                     // We cannot use the FramebufferUpdateEncoded::read_from method here, because it will read the message type as well
                     // let update = FramebufferUpdateEncoded::read_from(stream).await?;

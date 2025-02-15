@@ -329,6 +329,11 @@ impl WriteMessage for ServerInit {
     }
 }
 
+pub const FRAMEBUFFER_UPDATE_MESSAGE_TYPE: u8 = 0;
+pub const SET_COLOR_MAP_ENTRIES_MESSAGE_TYPE: u8 = 1;
+pub const BELL_MESSAGE_TYPE: u8 = 2;
+pub const SERVER_CUT_TEXT_MESSAGE_TYPE: u8 = 3;
+
 pub enum _ServerMessage {
     FramebufferUpdate(FramebufferUpdate),
     SetColorMapEntries(SetColorMapEntries),
@@ -507,10 +512,17 @@ impl ReadMessage for RectangleEncoded {
                     stream.read_exact(&mut data).await?;
                     data
                 }
-                ref other => {
-                    // unimplemented!("Unsupported encoding type: {:?} [width: {}, height: {}]", other, width, height);
-                    warn!("Unsupported encoding type: {:?} [width: {}, height: {}]", other, width, height);
+                EncodingType::QemuExtendedKeyEvents => {
+                    // todo!("extended key events: pos={:?}, dim={:?}", position, dimensions);
+
+                    // https://vncdotool.readthedocs.io/en/0.8.0/rfbproto.html#qemu-extended-key-event-psuedo-encoding
+                    // If a server wishes to receive raw keycodes it will send a FrameBufferUpdate with the matching psuedo-encoding and the num-rectanges field set to 1, however, no rectanges will actually be sent. 
                     vec![]
+                }
+                ref other => {
+                    unimplemented!("Unsupported encoding type: {:?} [width: {}, height: {}]", other, width, height);
+                    // warn!("Unsupported encoding type: {:?} [width: {}, height: {}]", other, width, height);
+                    // vec![]
                 }
             };
 
