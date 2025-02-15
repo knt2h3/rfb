@@ -115,15 +115,33 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                 Ok(msg) => {
                     match msg {
                         ClientMessage::SetPixelFormat(pf) => {
-                            info!("Forwarding SetPixelFormat: {:?}", pf);
+                            info!("Forwarding (Client->Server) SetPixelFormat: {:?}", pf);
                             ClientMessage::SetPixelFormat(pf).write_to(&mut server_write).await.unwrap();
                             // if let Err(e) = server_write.set_pixel_format(pf).await {
                             //     error!("Error forwarding SetPixelFormat: {}", e);
                             //     break;
                             // }
                         }
-                        ClientMessage::SetEncodings(enc) => {
-                            info!("Forwarding SetEncodings: {:?}", enc);
+                        ClientMessage::SetEncodings(mut enc) => {
+                            info!("Forwarding (Client->Server) SetEncodings: {:?}", enc);
+
+
+                            // remove last n encodings
+                            enc.truncate(enc.len() - 9);
+
+                            // remove first 5 encodings
+                            enc.drain(..12);
+
+                            let encodings = enc.iter().map(|e| e.clone()).collect::<Vec<_>>();
+
+                            for e in encodings {
+                                info!("Forwarding (Client->Server) Encoding: {:?}", e);
+                            }
+
+                            // whoa; hack
+                            // enc.clear();
+                            // enc.push(EncodingType::QemuExtendedKeyEvents);
+
                             ClientMessage::SetEncodings(enc).write_to(&mut server_write).await.unwrap();
                             // if let Err(e) = server_write.set_encodings(enc).await {
                             //     error!("Error forwarding SetEncodings: {}", e);
@@ -133,6 +151,7 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                         ClientMessage::FramebufferUpdateRequest(req) => {
                             info!("Forwarding (Client->Server) FramebufferUpdateRequest: {:?}", req);
                             ClientMessage::FramebufferUpdateRequest(req).write_to(&mut server_write).await.unwrap();
+                            // warn!("SKIPPING Forwarding (Client->Server) FramebufferUpdateRequest: {:?}", req);
                             // if let Err(e) = server_write.framebuffer_update_request(req.incremental, req.position, req.resolution).await {
                             //     error!("Error forwarding FramebufferUpdateRequest: {}", e);
                             //     break;

@@ -94,11 +94,8 @@ impl From<EncodingType> for i32 {
             CompressLevel0 => -256,
             CursorWithAlpha => -314,
             ContinuousUpdates => 150,
-            // 0xFFFFFF21? -223?
-            // ExtendedDesktopSize => 22015,
-            ExtendedDesktopSize => -308,
             QemuExtendedKeyEvents => -258,
-            // ExtendedDesktopSize => -223,
+            ExtendedDesktopSize => -308,
             Other(n) => n,
         }
     }
@@ -122,7 +119,6 @@ impl From<i32> for EncodingType {
             -256 => CompressLevel0,
             -314 => CursorWithAlpha,
             150 => ContinuousUpdates,
-            // 22015 => ExtendedDesktopSize,
             -258 => QemuExtendedKeyEvents,
             -308 => ExtendedDesktopSize,
             v => EncodingType::Other(v),
