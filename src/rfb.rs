@@ -815,6 +815,14 @@ pub enum ClientMessage {
     ClientCutText(String),
 }
 
+pub const SET_PIXEL_FORMAT_MESSAGE_TYPE: u8 = 0;
+pub const SET_ENCODINGS_MESSAGE_TYPE: u8 = 2;
+pub const FRAMEBUFFER_UPDATE_REQUEST_MESSAGE_TYPE: u8 = 3;
+pub const KEY_EVENT_MESSAGE_TYPE: u8 = 4;
+pub const POINTER_EVENT_MESSAGE_TYPE: u8 = 5;
+pub const CLIENT_CUT_TEXT_MESSAGE_TYPE: u8 = 6;
+pub const QEMU_CLIENT_MESSAGE_TYPE: u8 = 255;
+
 impl ReadMessage for ClientMessage {
     fn read_from<'a, R>(stream: &'a mut R) -> BoxFuture<'a, Result<ClientMessage, ProtocolError>>
     where
@@ -823,7 +831,7 @@ impl ReadMessage for ClientMessage {
         async {
             let t = stream.read_u8().await?;
             let res = match t {
-                0 => {
+                SET_PIXEL_FORMAT_MESSAGE_TYPE => {
                     // SetPixelFormat
                     let mut padding = [0u8; 3];
                     stream.read_exact(&mut padding).await?;
@@ -831,7 +839,7 @@ impl ReadMessage for ClientMessage {
                     Ok(ClientMessage::SetPixelFormat(pixel_format))
                 }
 
-                2 => {
+                SET_ENCODINGS_MESSAGE_TYPE => {
                     // SetEncodings
                     stream.read_u8().await?; // 1 byte of padding
                     let num_encodings = stream.read_u16().await?;
@@ -846,7 +854,8 @@ impl ReadMessage for ClientMessage {
 
                     Ok(ClientMessage::SetEncodings(encodings))
                 }
-                3 => {
+
+                FRAMEBUFFER_UPDATE_REQUEST_MESSAGE_TYPE => {
                     // FramebufferUpdateRequest
                     let incremental = match stream.read_u8().await? {
                         0 => false,
@@ -863,7 +872,8 @@ impl ReadMessage for ClientMessage {
 
                     Ok(ClientMessage::FramebufferUpdateRequest(fbu_req))
                 }
-                4 => {
+
+                KEY_EVENT_MESSAGE_TYPE => {
                     // KeyEvent
                     let is_pressed = match stream.read_u8().await? {
                         0 => false,
@@ -884,12 +894,14 @@ impl ReadMessage for ClientMessage {
 
                     Ok(ClientMessage::KeyEvent(key_event))
                 }
-                5 => {
+
+                POINTER_EVENT_MESSAGE_TYPE => {
                     // PointerEvent
                     let pointer_event = PointerEvent::read_from(stream).await?;
                     Ok(ClientMessage::PointerEvent(pointer_event))
                 }
-                6 => {
+
+                CLIENT_CUT_TEXT_MESSAGE_TYPE => {
                     // ClientCutText
 
                     // 3 bytes of padding
@@ -907,6 +919,12 @@ impl ReadMessage for ClientMessage {
 
                     Ok(ClientMessage::ClientCutText(text))
                 }
+
+                QEMU_CLIENT_MESSAGE_TYPE => {
+                    // QEMU Client Message
+                    unimplemented!("QEMU Client Message");
+                }
+
                 unknown => Err(ProtocolError::UnknownClientMessageType(unknown)),
             };
 
