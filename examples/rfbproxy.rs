@@ -259,6 +259,8 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                                     error!("Error writing rectangle data: {}", e);
                                     break;
                                 }
+
+                                warn!("Forwarded Rectangle: data_size={:.4} MiB", rect.data.len() as f64 / 1024.0 / 1024.0);
                             }
                         }
                         ServerMessage::Bell => {
