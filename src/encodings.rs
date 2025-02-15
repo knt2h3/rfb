@@ -40,7 +40,7 @@ use EncodingType::*;
 // #define VNC_ENCODING_WMVi                 0x574D5669
 // #define VNC_ENCODING_CLIPBOARD_EXT        0xc0a1e5ce
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[allow(unused)]
 pub enum EncodingType {
     Raw,
@@ -55,6 +55,7 @@ pub enum EncodingType {
     ZRLE2,
     JPEG,
     Zlib,
+    LedState,
     CompressLevel0,
     CursorWithAlpha,
     ContinuousUpdates,
@@ -91,6 +92,7 @@ impl From<EncodingType> for i32 {
             ZRLE2 => 24,
             JPEG => 21,
             Zlib => 6,
+            LedState => -261,
             CompressLevel0 => -256,
             CursorWithAlpha => -314,
             ContinuousUpdates => 150,
@@ -116,6 +118,7 @@ impl From<i32> for EncodingType {
             24 => ZRLE2,
             21 => JPEG,
             6 => Zlib,
+            -261 => LedState,
             -256 => CompressLevel0,
             -314 => CursorWithAlpha,
             150 => ContinuousUpdates,

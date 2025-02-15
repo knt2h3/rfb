@@ -125,6 +125,8 @@ async fn handle_connection(mut client_stream: TcpStream, server_addr: std::net::
                         ClientMessage::SetEncodings(mut enc) => {
                             info!("Forwarding (Client->Server) SetEncodings: {:?}", enc);
 
+                            // Remove -1063131698
+                            // enc.retain(|e| *e != EncodingType::Other(-1063131698));
 
                             // remove last n encodings
                             enc.truncate(enc.len() - 9);
