@@ -519,6 +519,20 @@ impl ReadMessage for RectangleEncoded {
                     // If a server wishes to receive raw keycodes it will send a FrameBufferUpdate with the matching psuedo-encoding and the num-rectanges field set to 1, however, no rectanges will actually be sent. 
                     vec![]
                 }
+                EncodingType::ExtendedDesktopSize => {
+                    // https://vncdotool.readthedocs.io/en/0.8.0/rfbproto.html#extendeddesktopsize-pseudo-encoding
+                    // todo!("extended desktop size: pos={:?}, dim={:?}", position, dimensions);
+
+                    let number_of_screens = stream.read_u8().await?;
+
+                    // padding
+                    let mut padding = [0u8; 3];
+                    stream.read_exact(&mut padding).await?;
+
+                    let mut data = vec![0u8; number_of_screens as usize * 16];
+                    stream.read_exact(&mut data).await?;
+                    data
+                }
                 ref other => {
                     unimplemented!("Unsupported encoding type: {:?} [width: {}, height: {}]", other, width, height);
                     // warn!("Unsupported encoding type: {:?} [width: {}, height: {}]", other, width, height);
@@ -532,6 +546,39 @@ impl ReadMessage for RectangleEncoded {
                 encoding_type,
                 data,
             })
+        }
+        .boxed()
+    }
+}
+
+// No. of bytes 	Type 	Description
+// 4 	U32 	id
+// 2 	U16 	x-position
+// 2 	U16 	y-position
+// 2 	U16 	width
+// 2 	U16 	height
+// 4 	U32 	flags
+pub struct Screen {
+    pub id: u32,
+    pub position: Position,
+    pub dimensions: Resolution,
+    pub flags: u32,
+}
+
+impl ReadMessage for Screen {
+    fn read_from<'a, R>(stream: &'a mut R) -> BoxFuture<'a, Result<Self, ProtocolError>>
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        async move {
+            let id = stream.read_u32().await?;
+            let x = stream.read_u16().await?;
+            let y = stream.read_u16().await?;
+            let width = stream.read_u16().await?;
+            let height = stream.read_u16().await?;
+            let flags = stream.read_u32().await?;
+
+            Ok(Screen { id, position: Position { x, y }, dimensions: Resolution { width, height }, flags })
         }
         .boxed()
     }

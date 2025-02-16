@@ -115,7 +115,7 @@ pub enum ServerMessage {
 
 #[derive(Debug)]
 pub struct CutText {
-    text: Vec<u8>,
+    pub text: Vec<u8>,
 }
 
 #[async_trait::async_trait]
