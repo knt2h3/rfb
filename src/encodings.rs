@@ -64,6 +64,13 @@ pub enum EncodingType {
     Other(i32),
 }
 
+impl PartialEq<i32> for EncodingType {
+    fn eq(&self, other: &i32) -> bool {
+        let encoding_type: i32 = (*self).into();
+        encoding_type == *other
+    }
+}
+
 pub trait Encoding
 where
     Self: Send,
