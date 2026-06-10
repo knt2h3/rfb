@@ -1,5 +1,4 @@
-use std::net::SocketAddr;
-use log::{error, info, debug};
+use log::{info, debug};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, Resolution, SecurityResult, SecurityType, SecurityTypes, ServerInit, WriteMessage}};
@@ -14,6 +13,8 @@ pub struct VncClientConfig {
 }
 
 pub struct Client<C> {
+    // Never read today; kept so split() can reconstruct per-half Clients (see commented code).
+    #[allow(dead_code)]
     config: VncClientConfig,
     conn: C,
     server_init: ServerInit,
@@ -81,7 +82,7 @@ where
     }
 
     pub fn split(self) {
-        let (rh, wh) = tokio::io::split(self.conn);
+        let (_rh, _wh) = tokio::io::split(self.conn);
         // (Client { config: self.config, conn: rh }, Client { config: self.config, conn: wh })
     } 
 
