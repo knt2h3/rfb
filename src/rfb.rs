@@ -37,6 +37,12 @@ pub enum ProtocolError {
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("unsupported framebuffer encoding ({0})")]
+    UnsupportedEncoding(i32),
+
+    #[error("decompression error: {0}")]
+    Decompress(String),
 }
 
 pub trait ReadMessage {

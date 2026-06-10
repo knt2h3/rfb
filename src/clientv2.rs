@@ -23,6 +23,10 @@ pub struct Client<C> {
 
 pub struct ClientReadHalf<C> {
     conn: tokio::io::ReadHalf<C>,
+    /// Persistent zlib inflate stream for the Zlib encoding (RFB 7.7.6): a single
+    /// stream spans every Zlib rectangle of the connection, so the decompressor
+    /// must be retained across `read_message` calls.
+    zlib: flate2::Decompress,
 }
 
 pub struct ClientWriteHalf<C> {
@@ -66,8 +70,15 @@ where
 
     pub fn split(self) -> (ClientReadHalf<C>, ClientWriteHalf<C>) {
         let (rh, wh) = tokio::io::split(self.conn);
-        (ClientReadHalf { conn: rh }, ClientWriteHalf { conn: wh })
-    } 
+        (
+            ClientReadHalf {
+                conn: rh,
+                // `true`: expect a zlib header (RFC 1950) — VNC Zlib uses zlib format.
+                zlib: flate2::Decompress::new(true),
+            },
+            ClientWriteHalf { conn: wh },
+        )
+    }
 }
 
 impl<C> ClientWriteHalf<C>
@@ -175,9 +186,162 @@ where
     C: AsyncRead + AsyncWrite + Unpin + Send,
 {
     pub async fn read_message(&mut self) -> Result<ServerMessage, ProtocolError> {
-        let msg = ServerMessage::read_from(&mut self.conn).await?;
-        Ok(msg)
+        // Stateful read: framebuffer rectangles may use the Zlib encoding, whose
+        // inflate stream (`self.zlib`) is persistent across rectangles, so we can't
+        // use the stateless `ServerMessage::read_from`.
+        let msg_type = self.conn.read_u8().await?;
+        match msg_type {
+            // FramebufferUpdate
+            0 => {
+                self.conn.read_u8().await?; // padding
+                let n_rect = self.conn.read_u16().await?;
+                let mut rectangles = Vec::with_capacity(n_rect as usize);
+                for _ in 0..n_rect {
+                    let rect = read_rectangle(&mut self.conn, &mut self.zlib).await?;
+                    rectangles.push(rect);
+                }
+                Ok(ServerMessage::FramebufferUpdate(FramebufferUpdateEncoded {
+                    rectangles,
+                }))
+            }
+            // Bell
+            2 => Ok(ServerMessage::Bell),
+            // ServerCutText
+            3 => {
+                let mut padding = [0_u8; 3];
+                self.conn.read_exact(&mut padding).await?;
+                let length = self.conn.read_u32().await?;
+                let mut text = vec![0_u8; length as usize];
+                self.conn.read_exact(&mut text).await?;
+                Ok(ServerMessage::ServerCutText(CutText { text }))
+            }
+            _ => Err(ProtocolError::UnknownServerMessageType(msg_type)),
+        }
     }
+}
+
+/// Read one encoded rectangle, decoding it where the client (rather than the
+/// browser) is the right place to do so. Zlib rectangles are inflated here (using
+/// the connection's persistent `zlib` stream) and presented downstream as `Raw`
+/// pixels; everything else is passed through unchanged.
+async fn read_rectangle<R>(
+    stream: &mut R,
+    zlib: &mut flate2::Decompress,
+) -> Result<RectangleEncoded, ProtocolError>
+where
+    R: AsyncRead + Unpin + Send,
+{
+    let x = stream.read_u16().await?;
+    let y = stream.read_u16().await?;
+    let width = stream.read_u16().await?;
+    let height = stream.read_u16().await?;
+    let encoding_type = EncodingType::from(stream.read_i32().await?);
+
+    let position = Position { x, y };
+    let dimensions = Resolution { width, height };
+    // The pixel format negotiated for this client is 32bpp (4 bytes/pixel); the Raw
+    // path assumes the same.
+    let raw_len = width as usize * height as usize * 4;
+
+    match encoding_type {
+        EncodingType::Raw => {
+            let mut data = vec![0u8; raw_len];
+            stream.read_exact(&mut data).await?;
+            Ok(RectangleEncoded {
+                position,
+                dimensions,
+                encoding_type,
+                data,
+            })
+        }
+        EncodingType::Zlib => {
+            // 4-byte length, then that many bytes fed into the persistent stream.
+            let len = stream.read_u32().await? as usize;
+            let mut compressed = vec![0u8; len];
+            stream.read_exact(&mut compressed).await?;
+            let data = zlib_inflate(zlib, &compressed, raw_len)?;
+            // Normalize to Raw: `data` is now raw pixels, so the wasm/JS layers
+            // treat compressed and uncompressed rectangles identically.
+            Ok(RectangleEncoded {
+                position,
+                dimensions,
+                encoding_type: EncodingType::Raw,
+                data,
+            })
+        }
+        EncodingType::CopyRect => {
+            // 2-byte source x, 2-byte source y. The client copies the on-screen
+            // region; no pixel data on the wire.
+            let mut data = vec![0u8; 4];
+            stream.read_exact(&mut data).await?;
+            Ok(RectangleEncoded {
+                position,
+                dimensions,
+                encoding_type,
+                data,
+            })
+        }
+        EncodingType::QemuExtendedKeyEvents => Ok(RectangleEncoded {
+            position,
+            dimensions,
+            encoding_type,
+            data: Vec::new(),
+        }),
+        EncodingType::ExtendedDesktopSize => {
+            let number_of_screens = stream.read_u8().await?;
+            let mut padding = [0u8; 3];
+            stream.read_exact(&mut padding).await?;
+            let mut data = vec![0u8; number_of_screens as usize * 16];
+            stream.read_exact(&mut data).await?;
+            Ok(RectangleEncoded {
+                position,
+                dimensions,
+                encoding_type,
+                data,
+            })
+        }
+        other => Err(ProtocolError::UnsupportedEncoding(other.into())),
+    }
+}
+
+/// Inflate one Zlib rectangle into exactly `expected` raw bytes, advancing the
+/// persistent zlib stream.
+fn zlib_inflate(
+    zlib: &mut flate2::Decompress,
+    mut input: &[u8],
+    expected: usize,
+) -> Result<Vec<u8>, ProtocolError> {
+    use flate2::{FlushDecompress, Status};
+
+    let mut out = vec![0u8; expected];
+    let mut written = 0usize;
+    while written < expected {
+        let in_before = zlib.total_in();
+        let out_before = zlib.total_out();
+        let status = zlib
+            .decompress(input, &mut out[written..], FlushDecompress::Sync)
+            .map_err(|e| ProtocolError::Decompress(e.to_string()))?;
+        let consumed = (zlib.total_in() - in_before) as usize;
+        let produced = (zlib.total_out() - out_before) as usize;
+        input = &input[consumed..];
+        written += produced;
+
+        if matches!(status, Status::StreamEnd) {
+            break;
+        }
+        if produced == 0 && consumed == 0 {
+            return Err(ProtocolError::Decompress(
+                "zlib made no progress decoding rectangle".to_string(),
+            ));
+        }
+    }
+
+    if written != expected {
+        return Err(ProtocolError::Decompress(format!(
+            "zlib produced {written} of {expected} expected bytes"
+        )));
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Error)]
@@ -232,4 +396,77 @@ async fn rfb_init(conn: &mut (impl AsyncRead + AsyncWrite + Unpin + Send), confi
     info!("Rx: ServerInit={:?}", server_init);
 
     Ok(server_init)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flate2::{Compress, Compression, FlushCompress};
+
+    /// Compress `pixels` into the persistent `compress` stream and frame them as
+    /// one on-wire Zlib rectangle (x, y, w, h, encoding=6, length, data).
+    fn zlib_rect_wire(
+        compress: &mut Compress,
+        x: u16,
+        y: u16,
+        w: u16,
+        h: u16,
+        pixels: &[u8],
+    ) -> Vec<u8> {
+        let mut compressed = Vec::new();
+        let mut input = pixels;
+        loop {
+            let in_before = compress.total_in();
+            let out_before = compress.total_out();
+            let mut buf = vec![0u8; pixels.len() + 1024];
+            compress
+                .compress(input, &mut buf, FlushCompress::Sync)
+                .unwrap();
+            let consumed = (compress.total_in() - in_before) as usize;
+            let produced = (compress.total_out() - out_before) as usize;
+            compressed.extend_from_slice(&buf[..produced]);
+            input = &input[consumed..];
+            if input.is_empty() && produced < buf.len() {
+                break;
+            }
+        }
+
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&x.to_be_bytes());
+        wire.extend_from_slice(&y.to_be_bytes());
+        wire.extend_from_slice(&w.to_be_bytes());
+        wire.extend_from_slice(&h.to_be_bytes());
+        wire.extend_from_slice(&6i32.to_be_bytes()); // EncodingType::Zlib
+        wire.extend_from_slice(&(compressed.len() as u32).to_be_bytes());
+        wire.extend_from_slice(&compressed);
+        wire
+    }
+
+    // A Zlib rectangle must inflate to the original pixels, and the inflate stream
+    // must persist across rectangles (the 2nd rectangle's compressed bytes depend
+    // on the 1st's dictionary). Regression guard for the Zlib decoder.
+    #[tokio::test]
+    async fn zlib_rectangles_round_trip_over_persistent_stream() {
+        let (w, h) = (8u16, 8u16);
+        let n = w as usize * h as usize * 4;
+        let pixels1: Vec<u8> = (0..n).map(|i| (i % 251) as u8).collect();
+        let pixels2: Vec<u8> = (0..n).map(|i| ((i * 7 + 3) % 251) as u8).collect();
+
+        let mut compress = Compress::new(Compression::default(), true);
+        let wire1 = zlib_rect_wire(&mut compress, 0, 0, w, h, &pixels1);
+        let wire2 = zlib_rect_wire(&mut compress, 8, 8, w, h, &pixels2);
+
+        let mut zlib = flate2::Decompress::new(true);
+
+        let mut r1: &[u8] = &wire1;
+        let rect1 = read_rectangle(&mut r1, &mut zlib).await.unwrap();
+        // Zlib rectangles are normalized to Raw for the downstream layers.
+        assert_eq!(rect1.encoding_type, EncodingType::Raw);
+        assert_eq!(rect1.dimensions.width, w);
+        assert_eq!(rect1.data, pixels1);
+
+        let mut r2: &[u8] = &wire2;
+        let rect2 = read_rectangle(&mut r2, &mut zlib).await.unwrap();
+        assert_eq!(rect2.position.x, 8);
+        assert_eq!(rect2.data, pixels2);
+    }
 }
