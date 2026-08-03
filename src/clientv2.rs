@@ -1,10 +1,9 @@
-use std::net::SocketAddr;
-use log::{error, info, debug};
+use log::{info, debug};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt};
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, FramebufferUpdate, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, RectangleEncoded, Resolution, SecurityResult, SecurityType, SecurityTypes, ServerInit, SetColorMapEntries, WriteMessage, _ServerMessage}};
+use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, RectangleEncoded, Resolution, SecurityResult, SecurityType, SecurityTypes, ServerInit, WriteMessage}};
 
 /// Immutable state
 pub struct VncClientConfig {
@@ -16,6 +15,7 @@ pub struct VncClientConfig {
 }
 
 pub struct Client<C> {
+    #[allow(dead_code)] // stored for parity with the constructors; nothing reads it yet
     config: VncClientConfig,
     conn: C,
     server_init: ServerInit,

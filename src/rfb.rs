@@ -7,7 +7,6 @@
 use bitflags::bitflags;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use log::warn;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
