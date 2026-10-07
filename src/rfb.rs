@@ -563,6 +563,7 @@ impl ReadMessage for RectangleEncoded {
 // 2 	U16 	width
 // 2 	U16 	height
 // 4 	U32 	flags
+#[derive(Debug, Copy, Clone)]
 pub struct Screen {
     pub id: u32,
     pub position: Position,
@@ -584,6 +585,22 @@ impl ReadMessage for Screen {
             let flags = stream.read_u32().await?;
 
             Ok(Screen { id, position: Position { x, y }, dimensions: Resolution { width, height }, flags })
+        }
+        .boxed()
+    }
+}
+
+impl WriteMessage for Screen {
+    fn write_to<'a, W>(self, stream: &'a mut W) -> BoxFuture<'a, Result<(), ProtocolError>>
+    where
+        W: AsyncWrite + Unpin + Send,
+    {
+        async move {
+            stream.write_u32(self.id).await?;
+            self.position.write_to(stream).await?;
+            self.dimensions.write_to(stream).await?;
+            stream.write_u32(self.flags).await?;
+            Ok(())
         }
         .boxed()
     }
@@ -865,6 +882,7 @@ pub enum ClientMessage {
     KeyEvent(KeyEvent),
     PointerEvent(PointerEvent),
     ClientCutText(String),
+    SetDesktopSize(SetDesktopSize),
 }
 
 pub const SET_PIXEL_FORMAT_MESSAGE_TYPE: u8 = 0;
@@ -873,6 +891,7 @@ pub const FRAMEBUFFER_UPDATE_REQUEST_MESSAGE_TYPE: u8 = 3;
 pub const KEY_EVENT_MESSAGE_TYPE: u8 = 4;
 pub const POINTER_EVENT_MESSAGE_TYPE: u8 = 5;
 pub const CLIENT_CUT_TEXT_MESSAGE_TYPE: u8 = 6;
+pub const SET_DESKTOP_SIZE_MESSAGE_TYPE: u8 = 251;
 pub const QEMU_CLIENT_MESSAGE_TYPE: u8 = 255;
 
 impl ReadMessage for ClientMessage {
@@ -972,6 +991,18 @@ impl ReadMessage for ClientMessage {
                     Ok(ClientMessage::ClientCutText(text))
                 }
 
+                SET_DESKTOP_SIZE_MESSAGE_TYPE => {
+                    stream.read_u8().await?; // 1 byte of padding
+                    let resolution = Resolution::read_from(stream).await?;
+                    let number_of_screens = stream.read_u8().await?;
+                    stream.read_u8().await?; // 1 byte of padding
+                    let mut screens = Vec::with_capacity(number_of_screens as usize);
+                    for _ in 0..number_of_screens {
+                        screens.push(Screen::read_from(stream).await?);
+                    }
+                    Ok(ClientMessage::SetDesktopSize(SetDesktopSize { resolution, screens }))
+                }
+
                 QEMU_CLIENT_MESSAGE_TYPE => {
                     // QEMU Client Message
                     unimplemented!("QEMU Client Message");
@@ -1034,12 +1065,33 @@ impl WriteMessage for ClientMessage {
                     stream.write_u32(text.len() as u32).await?;
                     stream.write_all(text.as_bytes()).await?;
                 }
+
+                ClientMessage::SetDesktopSize(req) => {
+                    stream.write_u8(SET_DESKTOP_SIZE_MESSAGE_TYPE).await?;
+                    stream.write_u8(0).await?; // 1 byte padding
+                    req.resolution.write_to(stream).await?;
+                    stream.write_u8(req.screens.len() as u8).await?;
+                    stream.write_u8(0).await?; // 1 byte padding
+                    for screen in req.screens {
+                        screen.write_to(stream).await?;
+                    }
+                }
             }
 
             Ok(())
         }
         .boxed()
     }
+}
+
+/// A client's request to change the desktop size (ExtendedDesktopSize
+/// SetDesktopSize). Only send it after the server has sent an
+/// ExtendedDesktopSize rectangle, which is how it says it supports it; the
+/// server answers with one whose `position.y` is the status (0 = done).
+#[derive(Debug)]
+pub struct SetDesktopSize {
+    pub resolution: Resolution,
+    pub screens: Vec<Screen>,
 }
 
 #[derive(Debug)]
@@ -1104,5 +1156,54 @@ impl ReadMessage for PointerEvent {
             Ok(PointerEvent { position, pressed })
         }
         .boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn set_desktop_size_1920x1080() -> ClientMessage {
+        ClientMessage::SetDesktopSize(SetDesktopSize {
+            resolution: Resolution { width: 1920, height: 1080 },
+            screens: vec![Screen {
+                id: 0,
+                position: Position { x: 0, y: 0 },
+                dimensions: Resolution { width: 1920, height: 1080 },
+                flags: 0,
+            }],
+        })
+    }
+
+    // RFB ExtendedDesktopSize: SetDesktopSize is message type 251, then pad,
+    // width, height, screen count, pad, and 16 bytes per screen.
+    #[tokio::test]
+    async fn set_desktop_size_wire_format() {
+        let mut wire = Vec::new();
+        set_desktop_size_1920x1080().write_to(&mut wire).await.unwrap();
+        let mut want = vec![251u8, 0];
+        want.extend_from_slice(&1920u16.to_be_bytes());
+        want.extend_from_slice(&1080u16.to_be_bytes());
+        want.extend_from_slice(&[1, 0]);
+        want.extend_from_slice(&0u32.to_be_bytes()); // id
+        want.extend_from_slice(&[0, 0, 0, 0]); // x, y
+        want.extend_from_slice(&1920u16.to_be_bytes());
+        want.extend_from_slice(&1080u16.to_be_bytes());
+        want.extend_from_slice(&0u32.to_be_bytes()); // flags
+        assert_eq!(wire, want);
+    }
+
+    #[tokio::test]
+    async fn set_desktop_size_round_trips() {
+        let mut wire = Vec::new();
+        set_desktop_size_1920x1080().write_to(&mut wire).await.unwrap();
+        let mut r: &[u8] = &wire;
+        let ClientMessage::SetDesktopSize(m) = ClientMessage::read_from(&mut r).await.unwrap() else {
+            panic!("expected SetDesktopSize");
+        };
+        assert_eq!((m.resolution.width, m.resolution.height), (1920, 1080));
+        assert_eq!(m.screens.len(), 1);
+        assert_eq!((m.screens[0].dimensions.width, m.screens[0].dimensions.height), (1920, 1080));
+        assert!(r.is_empty(), "read must consume the whole message");
     }
 }

@@ -3,7 +3,7 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt};
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, RectangleEncoded, Resolution, SecurityResult, SecurityType, SecurityTypes, ServerInit, WriteMessage}};
+use crate::{encodings::EncodingType, keysym::KeySym, rfb::{ClientInit, ClientMessage, FramebufferUpdateEncoded, FramebufferUpdateRequest, KeyEvent, MouseButtons, PixelFormat, PointerEvent, Position, ProtoVersion, ProtocolError, ReadMessage, RectangleEncoded, Resolution, Screen, SecurityResult, SecurityType, SecurityTypes, ServerInit, SetDesktopSize, WriteMessage}};
 
 /// Immutable state
 pub struct VncClientConfig {
@@ -113,6 +113,15 @@ where
 
     pub async fn client_cut_text(&mut self, text: String) -> Result<(), ProtocolError> {
         let msg = ClientMessage::ClientCutText(text);
+        msg.write_to(&mut self.conn).await
+    }
+
+    /// Ask the server for a `width` x `height` desktop, as one screen. Only
+    /// after the server has sent an ExtendedDesktopSize rectangle.
+    pub async fn set_desktop_size(&mut self, width: u16, height: u16) -> Result<(), ProtocolError> {
+        let resolution = Resolution { width, height };
+        let screen = Screen { id: 0, position: Position { x: 0, y: 0 }, dimensions: resolution, flags: 0 };
+        let msg = ClientMessage::SetDesktopSize(SetDesktopSize { resolution, screens: vec![screen] });
         msg.write_to(&mut self.conn).await
     }
 }

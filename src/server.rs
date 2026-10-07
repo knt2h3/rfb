@@ -274,6 +274,11 @@ impl<S: Server> VncServer<S> {
                     ClientMessage::ClientCutText(t) => {
                         trace!("Rx [{:?}: ClientCutText={:?}", addr, t);
                     }
+                    ClientMessage::SetDesktopSize(r) => {
+                        // This server never sends ExtendedDesktopSize, so a
+                        // client has no business asking; ignore it.
+                        trace!("Rx [{:?}: SetDesktopSize={:?}", addr, r);
+                    }
                 },
                 Err(e) => {
                     error!("[{:?}] error reading client message: {}", addr, e);
